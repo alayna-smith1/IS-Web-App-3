@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Provo/Orem Amazing Race Creator</title>
+
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.css" rel="stylesheet" />
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.15.0/mapbox-gl.js"></script>
+    <script src="https://unpkg.com/@mapbox/mapbox-gl-geocoder@4.8.0/dist/mapbox-gl-geocoder.min.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/@mapbox/mapbox-gl-geocoder@4.8.0/dist/mapbox-gl-geocoder.css" />
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+        }
+
+        header {
+            background: linear-gradient(90deg, #FF4500, #FFD700);
+            padding: 18px;
+            text-align: center;
+            font-size: 26px;
+            font-weight: bold;
+            color: #222;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+            padding: 20px;
+        }
+
+        .step {
+            margin: 20px 0;
+            padding: 14px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+        }
+
+        button,
+        input,
+        select {
+            font-size: 15px;
+            padding: 8px;
+            margin: 6px 0;
+            width: 100%;
+        }
+
+        button {
+            background: #FF4500;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #e03e00;
+        }
+
+        #map {
+            height: 450px;
+            margin-top: 18px;
+        }
+
+        .clueCard {
+            border: 1px solid #ccc;
+            padding: 8px;
+            margin: 10px 0;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>🏁 Provo/Orem Amazing Race & Date Planner ❤️</header>
+
+    <div class="container">
+
+        <div class="step">
+            <h3>Step 1 — Max Total Time (minutes)</h3>
+            <input id="maxTime" type="number" placeholder="E.g., 120">
+        </div>
+
+        <div class="step">
+            <h3>Step 2 — Choose 3–5 Race Locations</h3>
+            <button onclick="useRandomSuggestions()">Use Random Suggestions</button>
+            <div id="suggestions"></div>
+
+            <div id="selectedStops"></div>
+        </div>
+
+        <div class="step">
+            <h3>Step 3 — Pick the Final Date Spot</h3>
+            <input id="finalInput" placeholder="Enter final location name">
+        </div>
+
+        <div class="step">
+            <h3>Step 4 — Choose Riddle Style</h3>
+            <select id="riddleStyle">
+                <option value="Romantic">Romantic</option>
+                <option value="Playful">Playful</option>
+                <option value="Challenging">Challenging</option>
+            </select>
+        </div>
+
+        <button onclick="planRace()">Generate Clues & Map</button>
+
+        <div id="output"></div>
+
+        <button onclick="downloadPDF()">Export to PDF</button>
+
+        <div id="map"></div>
+
+    </div>
+
+    <script>
+        mapboxgl.accessToken = "pk.eyJ1IjoiYW1hemluZ3JhY2UxMjMiLCJhIjoiY21qM2N4ZG9zMDM1dzNmcTIzbWtscWhzdCJ9.v5DG7RSgdhz4QJTiS-68Bw";
+
+        // Static curated suggestions
+        const curated = [
+            "Rock Canyon Trailhead",
+            "Kiwanis Park (play area)",
+            "Hillcrest Pickleball Courts",
+            "Provo River Parkway",
+            "Y Trail Parking Lot",
+            "BYU Creamery",
+            "Provo City Center Temple Plaza",
+            "Utah Lake Marina",
+            "Memorial Park (near hospital)",
+            "Covey Center for the Arts"
+        ];
+
+        let selectedStops = [];
+
+        function useRandomSuggestions() {
+            document.getElementById("suggestions").innerHTML = "";
+            let shuffled = curated.sort(() => Math.random() - 0.5);
+            shuffled.slice(0, 6).forEach(loc => {
+                document.getElementById("suggestions").innerHTML += `
+      <div><button onclick="selectStop('${loc}')">${loc}</button></div>
+    `;
+            });
+        }
+
+        function selectStop(name) {
+            if (selectedStops.includes(name)) return;
+            if (selectedStops.length >= 5) {
+                alert("Max 5 stops!");
+                return;
+            }
+            selectedStops.push(name);
+            renderSelectedStops();
+        }
+
+        function renderSelectedStops() {
+            document.getElementById("selectedStops").innerHTML =
+                selectedStops.map((s, i) => `${i + 1}. ${s}`).join("<br>");
+        }
+
+        function generateTemplateRiddle(style, from, to) {
+            const riddleBank = {
+                Romantic: [
+                    `Where hearts beat between ${from} and ${to}, love will lead your feet.`,
+                    `From ${from} to ${to}, follow whispers of joy and sweet.`,
+                ],
+                Playful: [
+                    `Skip past ${from}, giggle your way to ${to}!`,
+                    `From ${from} to ${to} with a playful hop and clue!`,
+                ],
+                Challenging: [
+                    `From the stone grip of ${from} to the clue hidden by ${to}, think sharp!`,
+                    `Where echoes fade from ${from}, a puzzle leads you to ${to}.`,
+                ]
+            };
+            let arr = riddleBank[style] || riddleBank.Playful;
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        function planRace() {
+            const maxT = parseInt(document.getElementById("maxTime").value);
+            if (selectedStops.length < 3) {
+                alert("Select at least 3 stops!");
+                return;
+            }
+            const finalSpot = document.getElementById("finalInput").value.trim();
+            if (!finalSpot) {
+                alert("Enter final location!");
+                return;
+            }
+            const style = document.getElementById("riddleStyle").value;
+
+            const teamA = selectedStops.filter((_, i) => i % 2 === 0);
+            const teamB = selectedStops.filter((_, i) => i % 2 !== 0);
+
+            let out = `<h2>Team A Clues</h2>`;
+            teamA.forEach((loc, i) => {
+                const nextLoc = (i < teamA.length - 1) ? teamA[i + 1] : finalSpot;
+                out += `<div class="clueCard">
+      <strong>Clue A${i + 1}:</strong> ${generateTemplateRiddle(style, loc, nextLoc)}
+    </div>`;
+            });
+
+            out += `<h2>Team B Clues</h2>`;
+            teamB.forEach((loc, i) => {
+                const nextLoc = (i < teamB.length - 1) ? teamB[i + 1] : finalSpot;
+                out += `<div class="clueCard">
+      <strong>Clue B${i + 1}:</strong> ${generateTemplateRiddle(style, loc, nextLoc)}
+    </div>`;
+            });
+
+            document.getElementById("output").innerHTML = out;
+
+            showMap([...selectedStops, finalSpot]);
+        }
+
+        function showMap(points) {
+            document.getElementById("map").style.display = "block";
+            let map = new mapboxgl.Map({
+                container: "map",
+                style: "mapbox://styles/mapbox/streets-v11",
+                center: [-111.65, 40.25],
+                zoom: 11
+            });
+            points.forEach(p => {
+                new mapboxgl.Marker().setLngLat([-111.65, 40.25]).addTo(map);
+            });
+        }
+
+        function downloadPDF() {
+            const { jsPDF } = window.jspdf;
+            let doc = new jsPDF();
+            doc.text(document.getElementById("output").innerText, 10, 10);
+            doc.save("AmazingRaceClues.pdf");
+        }
+
+    </script>
+
+</body>
+
+</html>
